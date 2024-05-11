@@ -4,7 +4,7 @@ library(lubridate)
 library(tidymodels)
 library(modeltime)
 library(viridis)
-# library(timetk)
+library(timetk)
 
 # Load the data from a CSV file.
 data <- read.csv("data/timeseries_data_single_storeproduct.csv")
