@@ -4,14 +4,22 @@ library(lubridate)
 library(tidymodels)
 library(modeltime)
 library(viridis)
-library(timetk)
+# library(timetk)
 
 # Load the data from a CSV file.
-data <- read.csv("data/daily_energy_comsumption.csv")
+data <- read.csv("data/timeseries_data_single_storeproduct.csv")
+
+data |> 
+ glimpse()
+
+data |> 
+  summary()
+
+data <- data |> 
+  mutate(date = as.Date(date, format = "%m/%d/%Y"))
 
 # Preprocess data to include time-related factors and handle missing values.
-data_date_features <- data |> 
-  mutate(date = as.Date(date, format = "%m/%d/%Y")) |>  # Convert string Date to Date object
+df <- data |> 
   mutate(
     year = year(date),  # Extract year from date
     semester = factor(semester(date)),  # Extract semester (1st or 2nd)
@@ -22,61 +30,39 @@ data_date_features <- data |>
     month = factor(month(date, label = TRUE))  # Month as a factor
   )
 
-# Handle missing values by imputing closest value from the same day of week
-df <- data_date_features |> 
-  group_by(day_in_week) |> 
-  fill(energy, .direction = "downup") |>  # Fill NA values by carrying the last observation forward and backward
-  ungroup()
-
 glimpse(df)  # Quick view of the data structure to confirm transformations
 
 # Data Visualization
-## Line plot of energy consumption over time and color by weekend
-df |> 
-  mutate(
-    weekend = as.factor(case_when(
-      day_in_week %in% c("Sat", "Sun") ~ "Weekend",  # Create a weekend identifier
-      TRUE ~ "Weekday"
-    ))
-  ) |>
-  ggplot(aes(date, energy, color = weekend)) +
-  geom_line(alpha = 0.5, size = 1) +  # Line plot with transparency and size settings
-  theme_minimal() +
-  labs(title = "Daily Energy distribution by weekend")
+## Line plot of sales consumption over time and color by weekend
+df %>%
+  ggplot(aes(date, sales)) +
+  geom_line(alpha = 1, size = 1, color = "darkblue") +  
+  theme_bw() +
+  labs(title = "Daily Sales Distribution Over Time", x = "Date", y = "Sales") +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 years") +  # Format the date on the x-axis
+  scale_y_continuous(labels = scales::comma)  # Format y-axis with commas for thousands
 
-## Boxplot of energy consumption by day of the week
-df |> 
-  ggplot(aes(day_in_week, energy, color = day_in_week)) +
-  geom_boxplot() +  # Create boxplots grouped by day of the week
-  geom_jitter(alpha = 0.1) +  # Add jitter to show individual data points
-  theme_minimal() +
+## Boxplot of sales consumption by day of the week
+df |>
+  ggplot(aes(day_in_week, sales, color = day_in_week)) +
+  geom_boxplot() +
+  geom_jitter(alpha = 0.1) +
+  theme_bw() +
   scale_colour_viridis_d() +
-  labs(title = "Daily Energy distribution by day of week")
+  labs(title = "Daily Sales Distribution by Day of Week", x = "Day of the Week", y = "Sales") +
+  scale_x_discrete() +
+  scale_y_continuous(labels = scales::comma)
 
-## Scatter plot of energy consumption by day of the year with weekend vs weekday trend line
+## Violin and jitter plot of sales consumption by month
 df |> 
-  mutate(
-    weekend = as.factor(case_when(
-      day_in_week %in% c("Sat", "Sun") ~ "Weekend",
-      TRUE ~ "Weekday"
-    ))
-  ) |>
-  ggplot(aes(as.numeric(day_in_year), energy, color = weekend)) +
-  geom_point(alpha = 0.1, size = 2) +  # Point plot for daily data
-  theme_minimal() +
-  geom_smooth(method = "loess", se = FALSE) +  # Add LOESS curve for trend
-  labs(title = "Daily Energy distribution by day of year")
-
-## Violin and jitter plot of energy consumption by month
-df |> 
-  ggplot(aes(month, energy)) +
-  geom_violin(color = "darkgreen") +  # Create violin plots for density estimation
-  geom_jitter(alpha = 0.2, aes(color = energy)) +  # Overlay jittered points to show raw data
-  theme_minimal() +
-  geom_smooth(method = "loess", se = FALSE) +  # Smooth curve to show trend
+  ggplot(aes(month, sales)) +
+  geom_violin(color = "darkgreen") +  
+  geom_jitter(alpha = 0.2, aes(color = sales)) +  
+  theme_light() +
+  geom_smooth(method = "loess", se = FALSE) +  
   scale_colour_viridis_c() +
-  labs(title = "Daily Energy distribution by month")
-
+  labs(title = "Daily Sales Distribution by Month", x = "", y = "Sales", color= "Sales") 
+  
 # Data Splitting for Model Training
 ## Split the data into training and testing sets to prepare for model training and validation.
 
@@ -86,34 +72,46 @@ df_split <- df |>
 df_train <- training(df_split)
 df_test <- testing(df_split)
 
+# Combining the datasets
+df_combined <- bind_rows(df_train |> mutate(set = "Training"), df_test |> mutate(set = "Testing"))
+
+# Plotting the train/test split
+ggplot(df_combined, aes(x = date, y = sales, color = set)) +
+  geom_line() +  # Use geom_point if your data is better represented by points
+  scale_color_manual(values = c("Training" = "#1f77b4", "Testing" = "#ff7f0e")) +  # Custom color selection
+  labs(
+    title = "Visualization of Train/Test Data Split",
+    x = "Date",
+    y = "Sales",
+    color = "Dataset"
+  ) +
+  theme_minimal() +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 years") +
+  theme(legend.position = "top")
+
 set.seed(123)  # Set seed for reproducibility
 
 # Creating cross-validation folds of time series data
-df_folds <- time_series_cv(df_train, initial = "2 years", assess = "3 months", slice_limit = 10)  # Time-series cross-validation setup
+df_folds <- time_series_cv(df_train, initial = "3 years", assess = "1 year", skip = "6 months", slice_limit = 5)  # Time-series cross-validation setup
+
+plot_time_series_cv_plan(df_folds, date, sales)
 
 # Data Preparation for Modeling
 ## Create a recipe object for preprocessing the training data to be used in model fitting.
 
 # Recipe for auto arima boost model
 recipe_autoarima <- 
-  recipe(energy ~ date,
+  recipe(sales ~ date,
          data = df_train)
 
-# Recipe for xgboost
+# Recipe for rf
 recipe_rf <- 
-  recipe(energy ~ ., data = df_train) |>
-  step_holiday(date, holidays = timeDate::listHolidays("FR")) |>  # Add binary indicators for public holidays in France
+  recipe(sales ~ ., data = df_train) |>
+  step_holiday(date, holidays = timeDate::listHolidays("US")) |>  # Add binary indicators for public holidays in France
   step_rm(date) |>  # Remove the date column to prevent data leakage
-  step_dummy(all_nominal_predictors())  # Convert all nominal variables into dummy variables for modeling
+  step_dummy(all_nominal_predictors())
 
-
-# Recipe for xgboost
-recipe_xgb <- 
-  recipe(energy ~ ., data = df_train) |>
-  step_holiday(date, holidays = timeDate::listHolidays("FR")) |>  # Add binary indicators for public holidays in France
-  step_rm(date) |>  # Remove the date column to prevent data leakage
-  step_dummy(all_nominal_predictors())  # Convert all nominal variables into dummy variables for modeling
-
+recipe_rf |> prep() |> bake(new_data = NULL)
 
 # Model Setup and Resampling
 ## Define the specifications for various regression models including arima, random forest, and boosted trees.
@@ -127,17 +125,12 @@ rf_spec <-
   set_mode("regression") |> 
   set_engine("ranger")
 
-xgb_spec <- 
-  boost_tree(trees = 500) |>  # Boosted trees with 500 iterations
-  set_mode("regression") |> 
-  set_engine("xgboost")
-
 ## Create workflow set for modeling and fitting across all three models
 
 workflowset_df <- 
   workflow_set(
-    list(recipe_autoarima, recipe_rf, recipe_xgb),
-    list(auto_arima_spec, rf_spec, xgb_spec),
+    list(recipe_autoarima, recipe_rf),
+    list(auto_arima_spec, rf_spec),
     cross=FALSE
   )
 
@@ -178,10 +171,7 @@ predictions <- finalized_workflow %>%
   augment(df_test)  
 
 ## Calculate and review evaluation metrics to assess the performance of the final model.
-evaluation_metrics <- metric_set(rmse)
-results <- evaluation_metrics(predictions, truth = energy, estimate = .pred) 
+evaluation_metrics <- metric_set(rmse, mae, rsq)
+results <- evaluation_metrics(predictions, truth = sales, estimate = .pred) 
 print(results)  # Print the evaluation results to assess model accuracy
 
-## Conclude with the selection of the best model based on the evaluation and summarize its performance.
-selected_model <- best_workflow_id  # Specify the model type that was selected
-selected_model_rmse <- results$.estimate[results$.metric == "rmse"]  # Retrieve the RMSE value for the selected model
