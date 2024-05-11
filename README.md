@@ -4,7 +4,7 @@ This repository hosts the R scripts and datasets featured in the detailed blog p
 
 ## Repository Structure
 
-- **/data/**: Contains the datasets utilized in the analyses. These data represent simulated sales information over a decade, specifically designed for time series modeling.
+- **/data/**: Contains the datasets utilized in the analyses. These data represent simulated sales information over a decade, specifically designed for time series modeling. The data was sourced from [Kaggle](https://www.kaggle.com/datasets/samuelcortinhas/time-series-practice-dataset).
 - **time_series_regression.R**: The main R script file where the time series models are built and evaluated.
 - **time-series-regression-tidymodels.Rproj**: R Project file.
 - **README.md**: This file.
